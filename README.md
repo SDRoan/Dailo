@@ -1,12 +1,14 @@
-# HabitLoop
+# Dailo
 
-A habit tracker inspired by [MyHabitLoop](https://myhabitloop.co/products/habit-tracker12121111). Track your habits daily, see progress visually, and build long-term consistency.
+A habit and task tracker. Track habits daily, manage tasks per day, see progress visually, and build long-term consistency.
 
 ## Features
 
 - **Daily tracking** – Add habits and check them off each day in a simple grid (7 or 14 day view).
-- **Visual progress** – Streak counters and weekly completion bars so you stay motivated.
-- **Stats dashboard** – Overall consistency rate, total streak days, and per-habit progress.
+- **Weekly planner** – Tasks per day, overall progress, and completion stats.
+- **Reminders** – Per-habit remind, start, and end times with browser notifications.
+- **Planned duration & worked time** – Set start/end; see “Worked X” and “(X early)” when you finish before end.
+- **Visual progress** – Streak counters, weekly bars, donuts, and overall progress.
 - **Persistent data** – Everything is stored in your browser (localStorage); no account required.
 
 ## Run locally
