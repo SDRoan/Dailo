@@ -1,16 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { getHabits, saveHabits, getCompletions, saveCompletions, getTimeSpent, saveTimeSpent, getTasks, saveTasks, getCompletionTimes, saveCompletionTimes, todayKey, getCurrentWeekDates, getTwoWeeksDates, dateKey } from '../lib/storage'
+import { getHabits, saveHabits, getCompletions, saveCompletions, getTimeSpent, saveTimeSpent, addTimeForDay, getTasks, saveTasks, getCompletionTimes, saveCompletionTimes, getIfThenPlans, saveIfThenPlans, todayKey, getCurrentWeekDates, getTwoWeeksDates } from '../lib/storage'
 import { getStreak, getCompletionRate, getWeeklyCount } from '../lib/streaks'
 import { getReminderTimes, saveReminderTimes, requestNotificationPermission, checkAndNotify, formatReminderTime } from '../lib/reminders'
+import { buildCoachPayload, requestCoachAdvice, getCoachSnapshot, saveCoachSnapshot, clearCoachSnapshot } from '../lib/coach'
 import CalendarView from '../components/CalendarView'
 import OverallProgressChart from '../components/OverallProgressChart'
 import DonutChart from '../components/DonutChart'
 import WeeklyBarChartSimple from '../components/WeeklyBarChartSimple'
 import DailyTasksList from '../components/DailyTasksList'
+import FocusTimer from '../components/FocusTimer'
 
 function Tracker() {
   const [habits, setHabits] = useState([])
+  const [focusOpen, setFocusOpen] = useState(false)
   const [completions, setCompletions] = useState({})
   const [newHabitName, setNewHabitName] = useState('')
   const [editingId, setEditingId] = useState(null)
@@ -26,10 +29,18 @@ function Tracker() {
   const now = new Date()
   const [calendarMonth, setCalendarMonth] = useState({ year: now.getFullYear(), month: now.getMonth() })
   const [calendarHabitId, setCalendarHabitId] = useState(null)
+  const [calendarTaskDate, setCalendarTaskDate] = useState(todayKey())
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [timeSpent, setTimeSpent] = useState({})
   const [tasks, setTasks] = useState({})
   const [completionTimes, setCompletionTimes] = useState({})
+  const [ifThenPlans, setIfThenPlans] = useState({})
+  const [planOpenId, setPlanOpenId] = useState(null)
+  const [planCueInput, setPlanCueInput] = useState('')
+  const [planActionInput, setPlanActionInput] = useState('')
+  const [coachSnapshot, setCoachSnapshot] = useState(() => getCoachSnapshot())
+  const [coachLoading, setCoachLoading] = useState(false)
+  const [coachError, setCoachError] = useState('')
 
   useEffect(() => {
     setHabits(getHabits())
@@ -38,6 +49,7 @@ function Tracker() {
     setTimeSpent(getTimeSpent())
     setTasks(getTasks())
     setCompletionTimes(getCompletionTimes())
+    setIfThenPlans(getIfThenPlans())
   }, [])
 
   const persistTasks = useCallback((next) => {
@@ -59,11 +71,20 @@ function Tracker() {
   }
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    const runReminderCheck = () => {
       const today = todayKey()
       checkAndNotify(habits, reminders, (habitId) => !!(completions[habitId] || {})[today])
-    }, 30_000)
-    return () => clearInterval(interval)
+    }
+    runReminderCheck()
+    const interval = setInterval(runReminderCheck, 30_000)
+    const onVisible = () => {
+      if (!document.hidden) runReminderCheck()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [habits, reminders, completions])
 
   const persistHabits = useCallback((next) => {
@@ -74,6 +95,11 @@ function Tracker() {
   const persistCompletions = useCallback((next) => {
     setCompletions(next)
     saveCompletions(next)
+  }, [])
+
+  const persistIfThenPlans = useCallback((next) => {
+    setIfThenPlans(next)
+    saveIfThenPlans(next)
   }, [])
 
   const addHabit = () => {
@@ -113,7 +139,11 @@ function Tracker() {
     delete nextCompTimes[id]
     setCompletionTimes(nextCompTimes)
     saveCompletionTimes(nextCompTimes)
+    const nextPlans = { ...ifThenPlans }
+    delete nextPlans[id]
+    persistIfThenPlans(nextPlans)
     if (reminderOpenId === id) setReminderOpenId(null)
+    if (planOpenId === id) setPlanOpenId(null)
   }
 
   const setReminder = (habitId, remindAt, start, end) => {
@@ -143,10 +173,37 @@ function Tracker() {
 
   const openReminderPopover = (habitId) => {
     setReminderOpenId(habitId)
+    setPlanOpenId(null)
     const entry = reminders[habitId]
     setReminderRemindAtInput(entry?.remindAt || '')
     setReminderTimeInput(entry?.start || '09:00')
     setReminderEndTimeInput(entry?.end || '')
+  }
+
+  const setIfThenPlan = (habitId, cue, action) => {
+    const trimmedCue = cue.trim()
+    const trimmedAction = action.trim()
+    if (!trimmedCue || !trimmedAction) {
+      const next = { ...ifThenPlans }
+      delete next[habitId]
+      persistIfThenPlans(next)
+    } else {
+      persistIfThenPlans({
+        ...ifThenPlans,
+        [habitId]: { cue: trimmedCue, action: trimmedAction },
+      })
+    }
+    setPlanOpenId(null)
+    setPlanCueInput('')
+    setPlanActionInput('')
+  }
+
+  const openPlanPopover = (habitId) => {
+    setPlanOpenId(habitId)
+    setReminderOpenId(null)
+    const entry = ifThenPlans[habitId]
+    setPlanCueInput(entry?.cue || '')
+    setPlanActionInput(entry?.action || '')
   }
 
   const toggleCompletion = (habitId, dayKey) => {
@@ -280,12 +337,118 @@ function Tracker() {
     'Consistency beats intensity.',
   ]
   const motivationalQuote = MOTIVATIONAL_QUOTES[Math.floor(weekDates[0].replace(/-/g, '')) % MOTIVATIONAL_QUOTES.length]
+  const selectedCalendarTaskDateLabel = (() => {
+    const [y, m, day] = calendarTaskDate.split('-').map(Number)
+    return new Date(y, m - 1, day).toLocaleDateString(undefined, {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    })
+  })()
+  const calendarTaskCounts = Object.fromEntries(
+    Object.entries(tasks).map(([date, list]) => [date, list.length])
+  )
+  const todaysPlannedHabits = habits.filter((habit) => {
+    const plan = ifThenPlans[habit.id]
+    const hasPlan = !!(plan?.cue && plan?.action)
+    const doneToday = isCompleted(habit.id, today) || ((timeSpent[habit.id] || {})[today] || 0) > 0
+    return hasPlan && !doneToday
+  })
+  const habitIdByName = Object.fromEntries(
+    habits.map((habit) => [habit.name.trim().toLowerCase(), habit.id])
+  )
+  const resolveHabitId = (habitName) => habitIdByName[habitName?.trim().toLowerCase()] || null
+  const coachInsight = coachSnapshot?.insight || null
+  const coachGeneratedLabel = coachSnapshot?.generatedAt
+    ? new Date(coachSnapshot.generatedAt).toLocaleString(undefined, {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null
+  const coachIfThenSuggestions = (coachInsight?.ifThenSuggestions || []).map((row) => ({
+    ...row,
+    habitId: resolveHabitId(row.habit),
+  }))
+  const coachTopHabits = [...(coachInsight?.topHabits || [])].sort(
+    (a, b) => (b.focusScore ?? 0) - (a.focusScore ?? 0)
+  )
+  const coachDiagnosis = coachInsight?.diagnosis || []
+  const coachTodayPlan = coachInsight?.todayPlan || []
+  const coachWeeklyExperiment = coachInsight?.weeklyExperiment
+
+  const generateCoach = async () => {
+    if (habits.length === 0) {
+      setCoachError('Add at least one habit before generating AI advice.')
+      return
+    }
+    setCoachLoading(true)
+    setCoachError('')
+    try {
+      const payload = buildCoachPayload({
+        habits,
+        completions,
+        timeSpent,
+        tasks,
+        ifThenPlans,
+        today,
+        windowDays: 21,
+      })
+      const insight = await requestCoachAdvice(payload)
+      const nextSnapshot = {
+        generatedAt: new Date().toISOString(),
+        insight,
+      }
+      setCoachSnapshot(nextSnapshot)
+      saveCoachSnapshot(nextSnapshot)
+    } catch (err) {
+      setCoachError(err instanceof Error ? err.message : 'Could not generate AI advice.')
+    } finally {
+      setCoachLoading(false)
+    }
+  }
+
+  const clearCoach = () => {
+    setCoachSnapshot(null)
+    setCoachError('')
+    clearCoachSnapshot()
+  }
+
+  const applyCoachIfThen = (row) => {
+    if (!row?.habitId) return
+    setIfThenPlan(row.habitId, row.cue, row.action)
+  }
 
   return (
     <div className="app">
       <nav className="app-nav">
         <Link to="/" className="app-nav-back">← Home</Link>
+        <button
+          type="button"
+          className="focus-timer-trigger"
+          onClick={() => setFocusOpen(true)}
+        >
+          Focus
+        </button>
       </nav>
+      <FocusTimer
+        open={focusOpen}
+        onClose={() => setFocusOpen(false)}
+        onOpenInWindow={() => {
+          const width = 340
+          const height = 560
+          const left = Math.max(0, (window.screen?.availWidth ?? 800) - width - 24)
+          const top = Math.max(0, (window.screen?.availHeight ?? 600) - height - 24)
+          const w = window.open(
+            `${window.location.origin}/app/focus`,
+            'dailo-focus',
+            `width=${width},height=${height},left=${left},top=${top},scrollbars=no,resizable=yes`
+          )
+          if (w) w.focus()
+        }}
+      />
       <header className="header">
         <h1 className="logo">Dailo</h1>
         <p className="tagline">Track your habits and progress effortlessly</p>
@@ -357,6 +520,162 @@ function Tracker() {
           Add habit
         </button>
       </section>
+
+      <section className="ai-coach-section">
+        <div className="ai-coach-header">
+          <div>
+            <h2>AI Habit Coach</h2>
+            <p className="ai-coach-subtitle">Analyzes your recent habit history and gives a focused daily plan.</p>
+          </div>
+          <div className="ai-coach-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={generateCoach}
+              disabled={coachLoading || habits.length === 0}
+            >
+              {coachLoading ? 'Analyzing...' : coachSnapshot ? 'Regenerate advice' : 'Generate advice'}
+            </button>
+            {coachSnapshot && !coachLoading && (
+              <button type="button" className="btn ai-coach-clear-btn" onClick={clearCoach}>
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+        {coachGeneratedLabel && (
+          <p className="ai-coach-meta">Last generated: {coachGeneratedLabel}</p>
+        )}
+        {coachError && <p className="ai-coach-error">{coachError}</p>}
+        {habits.length === 0 && (
+          <p className="ai-coach-hint">Add habits first, then generate coaching suggestions.</p>
+        )}
+        {coachInsight && (
+          <div className="ai-coach-grid">
+            <article className="ai-coach-card ai-coach-card-summary">
+              <h3>Summary</h3>
+              <p>{coachInsight.summary}</p>
+            </article>
+
+            {coachDiagnosis.length > 0 && (
+              <article className="ai-coach-card ai-coach-card-summary">
+                <h3>Behavior diagnosis</h3>
+                <ul className="ai-coach-list">
+                  {coachDiagnosis.map((row, idx) => (
+                    <li key={`${row.pattern}-${idx}`}>
+                      <strong>{row.pattern}:</strong> {row.impact}
+                      <div className="ai-coach-evidence">{row.evidence}</div>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
+
+            {coachTopHabits.length > 0 && (
+              <article className="ai-coach-card">
+                <h3>Top habits today</h3>
+                <ul className="ai-coach-list">
+                  {coachTopHabits.map((row, idx) => (
+                    <li key={`${row.habit}-${idx}`}>
+                      <strong>{row.habit}:</strong> {row.reason}
+                      {row.focusScore != null && (
+                        <span className="ai-coach-score"> Focus {row.focusScore}/10</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
+
+            {coachIfThenSuggestions.length > 0 && (
+              <article className="ai-coach-card">
+                <h3>If-then suggestions</h3>
+                <div className="ai-coach-rows">
+                  {coachIfThenSuggestions.map((row, idx) => (
+                    <div key={`${row.habit}-${idx}`} className="ai-coach-row">
+                      <p>
+                        <strong>{row.habit}:</strong> If {row.cue}, then {row.action}.
+                      </p>
+                      {row.why && <p className="ai-coach-why">Why: {row.why}</p>}
+                      {row.habitId && (
+                        <button type="button" className="btn-sm" onClick={() => applyCoachIfThen(row)}>
+                          Use this plan
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </article>
+            )}
+
+            {coachInsight.fallbackPlans.length > 0 && (
+              <article className="ai-coach-card">
+                <h3>Missed-day fallback</h3>
+                <ul className="ai-coach-list">
+                  {coachInsight.fallbackPlans.map((row, idx) => (
+                    <li key={`${row.habit}-${idx}`}>
+                      <strong>{row.habit}:</strong> {row.minimumAction}
+                      {row.resetRule && <div className="ai-coach-evidence">Reset rule: {row.resetRule}</div>}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
+
+            {coachTodayPlan.length > 0 && (
+              <article className="ai-coach-card">
+                <h3>Today execution plan</h3>
+                <ol className="ai-coach-ordered-list">
+                  {coachTodayPlan.map((row, idx) => (
+                    <li key={`${row.timeWindow}-${idx}`}>
+                      <strong>{row.timeWindow}:</strong> {row.step}
+                      {row.purpose && <div className="ai-coach-evidence">{row.purpose}</div>}
+                    </li>
+                  ))}
+                </ol>
+              </article>
+            )}
+
+            {coachWeeklyExperiment && (
+              <article className="ai-coach-card">
+                <h3>{coachWeeklyExperiment.name || 'Weekly experiment'}</h3>
+                {coachWeeklyExperiment.hypothesis && <p>{coachWeeklyExperiment.hypothesis}</p>}
+                {coachWeeklyExperiment.execution && (
+                  <p className="ai-coach-evidence">Execution: {coachWeeklyExperiment.execution}</p>
+                )}
+                {coachWeeklyExperiment.successMetric && (
+                  <p className="ai-coach-evidence">Success metric: {coachWeeklyExperiment.successMetric}</p>
+                )}
+              </article>
+            )}
+          </div>
+        )}
+      </section>
+
+      {todaysPlannedHabits.length > 0 && (
+        <section className="if-then-section">
+          <div className="if-then-header">
+            <h2>Today&apos;s cues</h2>
+            <p className="if-then-subtitle">For habits still pending, follow your saved if-then action.</p>
+          </div>
+          <div className="if-then-list">
+            {todaysPlannedHabits.map((habit) => {
+              const plan = ifThenPlans[habit.id]
+              return (
+                <div key={habit.id} className="if-then-card">
+                  <span className="if-then-card-habit">{habit.name}</span>
+                  <p className="if-then-card-plan">
+                    <strong>If</strong> {plan.cue}, <strong>then</strong> {plan.action}.
+                  </p>
+                  <button type="button" className="btn-sm" onClick={() => toggleCompletion(habit.id, today)}>
+                    Mark done
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="tracker-section">
         <div className="tracker-header">
@@ -528,6 +847,52 @@ function Tracker() {
                             </div>
                           )}
                         </div>
+                        <div className="plan-wrap">
+                          <button
+                            type="button"
+                            className={`icon-btn plan-btn ${(ifThenPlans[habit.id]?.cue && ifThenPlans[habit.id]?.action) ? 'on' : ''}`}
+                            onClick={() => (planOpenId === habit.id ? setPlanOpenId(null) : openPlanPopover(habit.id))}
+                            title={(ifThenPlans[habit.id]?.cue && ifThenPlans[habit.id]?.action) ? `If ${ifThenPlans[habit.id].cue}, then ${ifThenPlans[habit.id].action}` : 'Set If-Then plan'}
+                            aria-label="Set if-then plan"
+                          >
+                            🎯
+                          </button>
+                          {(ifThenPlans[habit.id]?.cue && ifThenPlans[habit.id]?.action) && (
+                            <span className="plan-label">
+                              If {ifThenPlans[habit.id].cue}, then {ifThenPlans[habit.id].action}
+                            </span>
+                          )}
+                          {planOpenId === habit.id && (
+                            <div className="plan-popover">
+                              <span className="reminder-popover-title">If-Then plan</span>
+                              <p className="reminder-popover-hint">Make it specific: If [cue], then [small action].</p>
+                              <label className="reminder-popover-label">If (cue)</label>
+                              <input
+                                type="text"
+                                value={planCueInput}
+                                onChange={(e) => setPlanCueInput(e.target.value)}
+                                className="plan-text-input"
+                                placeholder="After dinner at 8 PM"
+                              />
+                              <label className="reminder-popover-label">Then (action)</label>
+                              <input
+                                type="text"
+                                value={planActionInput}
+                                onChange={(e) => setPlanActionInput(e.target.value)}
+                                className="plan-text-input"
+                                placeholder="Read for 10 minutes"
+                              />
+                              <div className="reminder-popover-actions">
+                                <button type="button" className="btn-sm" onClick={() => setIfThenPlan(habit.id, planCueInput, planActionInput)}>
+                                  Save
+                                </button>
+                                <button type="button" className="btn-sm ghost" onClick={() => setIfThenPlan(habit.id, '', '')}>
+                                  Clear
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                         <button
                           type="button"
                           className="icon-btn edit"
@@ -636,7 +1001,7 @@ function Tracker() {
         </button>
         {calendarOpen && (
           <div className="calendar-dropdown-content">
-            <p className="calendar-intro">View and log past completions. Select a habit to click days and toggle.</p>
+            <p className="calendar-intro">Click any day to manage tasks. Select a habit to also mark completions.</p>
             <CalendarView
               year={calendarMonth.year}
               month={calendarMonth.month}
@@ -655,15 +1020,31 @@ function Tracker() {
               onGoToToday={() => {
                 const d = new Date()
                 setCalendarMonth({ year: d.getFullYear(), month: d.getMonth() })
+                setCalendarTaskDate(todayKey())
               }}
               habits={habits}
               completions={completions}
               selectedHabitId={calendarHabitId}
               onSelectHabit={setCalendarHabitId}
+              selectedDateKey={calendarTaskDate}
+              onSelectDate={setCalendarTaskDate}
+              taskCounts={calendarTaskCounts}
               today={today}
-              isCompleted={isCompleted}
               onToggleDay={toggleCompletion}
             />
+            <div className="calendar-tasks-panel">
+              <div className="calendar-tasks-header">
+                <span className="calendar-tasks-title">Tasks for</span>
+                <span className="calendar-tasks-date">{selectedCalendarTaskDateLabel}</span>
+              </div>
+              <DailyTasksList
+                dateKey={calendarTaskDate}
+                tasks={getTasksForDay(calendarTaskDate)}
+                onToggle={toggleTask}
+                onRemove={removeTask}
+                onAdd={addTask}
+              />
+            </div>
           </div>
         )}
       </section>

@@ -3,6 +3,7 @@ const COMPLETIONS_KEY = 'habitloop_completions'
 const TIME_SPENT_KEY = 'habitloop_time'
 const TASKS_KEY = 'habitloop_tasks'
 const COMPLETION_TIMES_KEY = 'habitloop_completion_times'
+const IF_THEN_PLANS_KEY = 'habitloop_if_then_plans'
 
 export function getHabits() {
   try {
@@ -69,6 +70,20 @@ export function getCompletionTimes() {
 
 export function saveCompletionTimes(times) {
   localStorage.setItem(COMPLETION_TIMES_KEY, JSON.stringify(times))
+}
+
+/** If-then plans per habit: { habitId: { cue: string, action: string } } */
+export function getIfThenPlans() {
+  try {
+    const raw = localStorage.getItem(IF_THEN_PLANS_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function saveIfThenPlans(plans) {
+  localStorage.setItem(IF_THEN_PLANS_KEY, JSON.stringify(plans))
 }
 
 /** Add minutes to a habit for a given day. Returns updated time for that day. */
@@ -172,4 +187,48 @@ export function getCalendarGrid(year, month) {
     })
   }
   return grid
+}
+
+/** Focus timer: minutes focused per day { [dateKey]: number } */
+const FOCUS_MINUTES_KEY = 'habitloop_focus_minutes'
+
+export function getFocusMinutes() {
+  try {
+    const raw = localStorage.getItem(FOCUS_MINUTES_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function saveFocusMinutes(focusMinutes) {
+  localStorage.setItem(FOCUS_MINUTES_KEY, JSON.stringify(focusMinutes))
+}
+
+export function addFocusMinutes(dateKey, minutes) {
+  const data = getFocusMinutes()
+  const current = data[dateKey] || 0
+  const next = { ...data, [dateKey]: current + minutes }
+  saveFocusMinutes(next)
+  return next
+}
+
+/** Focus timer running session (for standalone window restore). */
+const FOCUS_SESSION_KEY = 'habitloop_focus_session'
+
+export function getFocusSession() {
+  try {
+    const raw = localStorage.getItem(FOCUS_SESSION_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+export function saveFocusSession(session) {
+  if (session == null) {
+    localStorage.removeItem(FOCUS_SESSION_KEY)
+    return
+  }
+  localStorage.setItem(FOCUS_SESSION_KEY, JSON.stringify(session))
 }

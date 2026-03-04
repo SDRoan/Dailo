@@ -1,11 +1,12 @@
 const REMINDERS_KEY = 'habitloop_reminders'
+const NOTIFY_LOOKBACK_MS = 10 * 60 * 1000
 
 function load() {
   try {
     const raw = localStorage.getItem(REMINDERS_KEY)
-    return raw ? JSON.parse(raw) : { times: {}, lastNotified: {} }
+    return raw ? JSON.parse(raw) : { times: {}, lastNotified: {}, lastCheckedAt: 0 }
   } catch {
-    return { times: {}, lastNotified: {} }
+    return { times: {}, lastNotified: {}, lastCheckedAt: 0 }
   }
 }
 
@@ -48,6 +49,17 @@ function getLastNotified(key) {
   return load().lastNotified?.[key] || null
 }
 
+function getLastCheckedAt() {
+  const value = Number(load().lastCheckedAt)
+  return Number.isFinite(value) ? value : 0
+}
+
+function saveLastCheckedAt(timestamp) {
+  const data = load()
+  data.lastCheckedAt = timestamp
+  localStorage.setItem(REMINDERS_KEY, JSON.stringify(data))
+}
+
 export function requestNotificationPermission() {
   if (!('Notification' in window)) return Promise.resolve('unsupported')
   if (Notification.permission === 'granted') return Promise.resolve('granted')
@@ -65,16 +77,42 @@ function addMinutesToHM(hm, delta) {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
 }
 
+function toTodayTimestamp(hm, now) {
+  const [h, m] = hm.split(':').map(Number)
+  return new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    h || 0,
+    m || 0,
+    0,
+    0
+  ).getTime()
+}
+
+function shouldNotifyInWindow(hm, windowStartMs, nowMs, nowDate) {
+  if (!hm) return false
+  const scheduledMs = toTodayTimestamp(hm, nowDate)
+  return scheduledMs > windowStartMs && scheduledMs <= nowMs
+}
+
 /** Call periodically (e.g. every 30s). Remind + Start + End (5 min, 1 min, over).
  *  If isCompletedToday(habitId) is true, end-time warnings are skipped for that habit (task already done).
  */
 export function checkAndNotify(habits, reminderTimes, isCompletedToday) {
   if (!habits?.length || !reminderTimes) return
-  if (!('Notification' in window) || Notification.permission !== 'granted') return
 
   const now = new Date()
+  const nowMs = now.getTime()
+  const lastCheckedAt = getLastCheckedAt()
+  const windowStartMs = lastCheckedAt > 0 ? Math.max(lastCheckedAt, nowMs - NOTIFY_LOOKBACK_MS) : nowMs - 60_000
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-  const currentHM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+  const notificationsEnabled = 'Notification' in window && Notification.permission === 'granted'
+
+  if (!notificationsEnabled) {
+    saveLastCheckedAt(nowMs)
+    return
+  }
 
   habits.forEach((habit) => {
     const entry = reminderTimes[habit.id]
@@ -87,7 +125,11 @@ export function checkAndNotify(habits, reminderTimes, isCompletedToday) {
     const endKey = `${habit.id}_end`
 
     // Remind: separate notification system — "Reminder: {habit}" at remindAt time only
-    if (entry.remindAt && entry.remindAt === currentHM && getLastNotified(remindKey) !== today) {
+    if (
+      entry.remindAt &&
+      getLastNotified(remindKey) !== today &&
+      shouldNotifyInWindow(entry.remindAt, windowStartMs, nowMs, now)
+    ) {
       try {
         new Notification('Dailo', {
           body: `Reminder: ${habit.name}`,
@@ -98,7 +140,11 @@ export function checkAndNotify(habits, reminderTimes, isCompletedToday) {
     }
 
     // Start time: "Time for: {habit}"
-    if (entry.start && entry.start === currentHM && getLastNotified(startKey) !== today) {
+    if (
+      entry.start &&
+      getLastNotified(startKey) !== today &&
+      shouldNotifyInWindow(entry.start, windowStartMs, nowMs, now)
+    ) {
       try {
         new Notification('Dailo', {
           body: `Time for: ${habit.name}`,
@@ -116,7 +162,10 @@ export function checkAndNotify(habits, reminderTimes, isCompletedToday) {
     const end5HM = addMinutesToHM(endHM, -5)
     const end1HM = addMinutesToHM(endHM, -1)
 
-    if (currentHM === end5HM && getLastNotified(end5Key) !== today) {
+    if (
+      getLastNotified(end5Key) !== today &&
+      shouldNotifyInWindow(end5HM, windowStartMs, nowMs, now)
+    ) {
       try {
         new Notification('Dailo', {
           body: `First warning: ${habit.name} ends in 5 minutes`,
@@ -125,7 +174,10 @@ export function checkAndNotify(habits, reminderTimes, isCompletedToday) {
         saveLastNotified(end5Key, today)
       } catch (_) {}
     }
-    if (currentHM === end1HM && getLastNotified(end1Key) !== today) {
+    if (
+      getLastNotified(end1Key) !== today &&
+      shouldNotifyInWindow(end1HM, windowStartMs, nowMs, now)
+    ) {
       try {
         new Notification('Dailo', {
           body: `Final warning: ${habit.name} ends in 1 minute`,
@@ -134,7 +186,10 @@ export function checkAndNotify(habits, reminderTimes, isCompletedToday) {
         saveLastNotified(end1Key, today)
       } catch (_) {}
     }
-    if (currentHM === endHM && getLastNotified(endKey) !== today) {
+    if (
+      getLastNotified(endKey) !== today &&
+      shouldNotifyInWindow(endHM, windowStartMs, nowMs, now)
+    ) {
       try {
         new Notification('Dailo', {
           body: `${habit.name} time is over`,
@@ -144,6 +199,8 @@ export function checkAndNotify(habits, reminderTimes, isCompletedToday) {
       } catch (_) {}
     }
   })
+
+  saveLastCheckedAt(nowMs)
 }
 
 /** Format "07:00" -> "7:00 AM", "13:30" -> "1:30 PM" */

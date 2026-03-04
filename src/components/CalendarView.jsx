@@ -10,8 +10,10 @@ function CalendarView({
   completions,
   selectedHabitId,
   onSelectHabit,
+  selectedDateKey,
+  onSelectDate,
+  taskCounts = {},
   today,
-  isCompleted,
   onToggleDay,
 }) {
   const grid = getCalendarGrid(year, month)
@@ -78,12 +80,15 @@ function CalendarView({
         {grid.map((cell) => {
           const completed = isDayCompleted(cell.dateKey)
           const isToday = cell.dateKey === today
+          const isSelected = cell.dateKey === selectedDateKey
           const toggleable = canToggle(cell.dateKey)
+          const habitCompleted = selectedHabitId ? !!completions[selectedHabitId]?.[cell.dateKey] : false
+          const taskCount = taskCounts[cell.dateKey] || 0
           return (
             <div
               key={cell.dateKey}
-              className={`calendar-cell ${!cell.isCurrentMonth ? 'other-month' : ''} ${isToday ? 'today' : ''} ${completed ? 'completed' : ''} ${toggleable ? 'clickable' : ''}`}
-              onClick={toggleable ? () => onToggleDay(selectedHabitId, cell.dateKey) : undefined}
+              className={`calendar-cell ${!cell.isCurrentMonth ? 'other-month' : ''} ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''} ${completed ? 'completed' : ''} clickable`}
+              onClick={() => onSelectDate?.(cell.dateKey)}
               title={cell.dateKey}
             >
               <span className="calendar-cell-day">{cell.day}</span>
@@ -92,13 +97,35 @@ function CalendarView({
                   {!selectedHabitId && habits.length > 1 ? getCompletedCount(cell.dateKey) : '✓'}
                 </span>
               )}
+              {taskCount > 0 && (
+                <span className="calendar-cell-task-count" title={`${taskCount} task${taskCount > 1 ? 's' : ''}`}>
+                  {taskCount}
+                </span>
+              )}
+              {selectedHabitId && toggleable && (
+                <button
+                  type="button"
+                  className={`calendar-cell-toggle ${habitCompleted ? 'checked' : ''}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onToggleDay(selectedHabitId, cell.dateKey)
+                  }}
+                  aria-label={`${habitCompleted ? 'Unmark' : 'Mark'} completion for ${cell.dateKey}`}
+                  title={habitCompleted ? 'Unmark completion' : 'Mark completion'}
+                >
+                  {habitCompleted ? '✓' : '○'}
+                </button>
+              )}
             </div>
           )
         })}
       </div>
 
       {selectedHabitId && (
-        <p className="calendar-hint">Click a day to mark complete or incomplete (past and today only).</p>
+        <p className="calendar-hint">Click a day to open tasks for that date. Use ○/✓ inside past days to toggle the selected habit.</p>
+      )}
+      {!selectedHabitId && (
+        <p className="calendar-hint">Click a day to create tasks for that date.</p>
       )}
     </div>
   )
