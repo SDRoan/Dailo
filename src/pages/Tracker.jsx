@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { getHabits, saveHabits, getCompletions, saveCompletions, getTimeSpent, saveTimeSpent, addTimeForDay, getTasks, saveTasks, getCompletionTimes, saveCompletionTimes, getIfThenPlans, saveIfThenPlans, todayKey, getCurrentWeekDates, getTwoWeeksDates } from '../lib/storage'
 import { getStreak, getCompletionRate, getWeeklyCount } from '../lib/streaks'
 import { getReminderTimes, saveReminderTimes, requestNotificationPermission, checkAndNotify, formatReminderTime } from '../lib/reminders'
-import { buildCoachPayload, requestCoachAdvice, getCoachSnapshot, saveCoachSnapshot, clearCoachSnapshot } from '../lib/coach'
 import CalendarView from '../components/CalendarView'
 import OverallProgressChart from '../components/OverallProgressChart'
 import DonutChart from '../components/DonutChart'
@@ -38,9 +37,6 @@ function Tracker() {
   const [planOpenId, setPlanOpenId] = useState(null)
   const [planCueInput, setPlanCueInput] = useState('')
   const [planActionInput, setPlanActionInput] = useState('')
-  const [coachSnapshot, setCoachSnapshot] = useState(() => getCoachSnapshot())
-  const [coachLoading, setCoachLoading] = useState(false)
-  const [coachError, setCoachError] = useState('')
 
   useEffect(() => {
     setHabits(getHabits())
@@ -355,71 +351,6 @@ function Tracker() {
     const doneToday = isCompleted(habit.id, today) || ((timeSpent[habit.id] || {})[today] || 0) > 0
     return hasPlan && !doneToday
   })
-  const habitIdByName = Object.fromEntries(
-    habits.map((habit) => [habit.name.trim().toLowerCase(), habit.id])
-  )
-  const resolveHabitId = (habitName) => habitIdByName[habitName?.trim().toLowerCase()] || null
-  const coachInsight = coachSnapshot?.insight || null
-  const coachGeneratedLabel = coachSnapshot?.generatedAt
-    ? new Date(coachSnapshot.generatedAt).toLocaleString(undefined, {
-        day: '2-digit',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    : null
-  const coachIfThenSuggestions = (coachInsight?.ifThenSuggestions || []).map((row) => ({
-    ...row,
-    habitId: resolveHabitId(row.habit),
-  }))
-  const coachTopHabits = [...(coachInsight?.topHabits || [])].sort(
-    (a, b) => (b.focusScore ?? 0) - (a.focusScore ?? 0)
-  )
-  const coachDiagnosis = coachInsight?.diagnosis || []
-  const coachTodayPlan = coachInsight?.todayPlan || []
-  const coachWeeklyExperiment = coachInsight?.weeklyExperiment
-
-  const generateCoach = async () => {
-    if (habits.length === 0) {
-      setCoachError('Add at least one habit before generating AI advice.')
-      return
-    }
-    setCoachLoading(true)
-    setCoachError('')
-    try {
-      const payload = buildCoachPayload({
-        habits,
-        completions,
-        timeSpent,
-        tasks,
-        ifThenPlans,
-        today,
-        windowDays: 21,
-      })
-      const insight = await requestCoachAdvice(payload)
-      const nextSnapshot = {
-        generatedAt: new Date().toISOString(),
-        insight,
-      }
-      setCoachSnapshot(nextSnapshot)
-      saveCoachSnapshot(nextSnapshot)
-    } catch (err) {
-      setCoachError(err instanceof Error ? err.message : 'Could not generate AI advice.')
-    } finally {
-      setCoachLoading(false)
-    }
-  }
-
-  const clearCoach = () => {
-    setCoachSnapshot(null)
-    setCoachError('')
-    clearCoachSnapshot()
-  }
-
-  const applyCoachIfThen = (row) => {
-    if (!row?.habitId) return
-    setIfThenPlan(row.habitId, row.cue, row.action)
-  }
 
   return (
     <div className="app">
@@ -519,137 +450,6 @@ function Tracker() {
         <button type="button" onClick={addHabit} className="btn btn-primary">
           Add habit
         </button>
-      </section>
-
-      <section className="ai-coach-section">
-        <div className="ai-coach-header">
-          <div>
-            <h2>AI Habit Coach</h2>
-            <p className="ai-coach-subtitle">Analyzes your recent habit history and gives a focused daily plan.</p>
-          </div>
-          <div className="ai-coach-actions">
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={generateCoach}
-              disabled={coachLoading || habits.length === 0}
-            >
-              {coachLoading ? 'Analyzing...' : coachSnapshot ? 'Regenerate advice' : 'Generate advice'}
-            </button>
-            {coachSnapshot && !coachLoading && (
-              <button type="button" className="btn ai-coach-clear-btn" onClick={clearCoach}>
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-        {coachGeneratedLabel && (
-          <p className="ai-coach-meta">Last generated: {coachGeneratedLabel}</p>
-        )}
-        {coachError && <p className="ai-coach-error">{coachError}</p>}
-        {habits.length === 0 && (
-          <p className="ai-coach-hint">Add habits first, then generate coaching suggestions.</p>
-        )}
-        {coachInsight && (
-          <div className="ai-coach-grid">
-            <article className="ai-coach-card ai-coach-card-summary">
-              <h3>Summary</h3>
-              <p>{coachInsight.summary}</p>
-            </article>
-
-            {coachDiagnosis.length > 0 && (
-              <article className="ai-coach-card ai-coach-card-summary">
-                <h3>Behavior diagnosis</h3>
-                <ul className="ai-coach-list">
-                  {coachDiagnosis.map((row, idx) => (
-                    <li key={`${row.pattern}-${idx}`}>
-                      <strong>{row.pattern}:</strong> {row.impact}
-                      <div className="ai-coach-evidence">{row.evidence}</div>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            )}
-
-            {coachTopHabits.length > 0 && (
-              <article className="ai-coach-card">
-                <h3>Top habits today</h3>
-                <ul className="ai-coach-list">
-                  {coachTopHabits.map((row, idx) => (
-                    <li key={`${row.habit}-${idx}`}>
-                      <strong>{row.habit}:</strong> {row.reason}
-                      {row.focusScore != null && (
-                        <span className="ai-coach-score"> Focus {row.focusScore}/10</span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            )}
-
-            {coachIfThenSuggestions.length > 0 && (
-              <article className="ai-coach-card">
-                <h3>If-then suggestions</h3>
-                <div className="ai-coach-rows">
-                  {coachIfThenSuggestions.map((row, idx) => (
-                    <div key={`${row.habit}-${idx}`} className="ai-coach-row">
-                      <p>
-                        <strong>{row.habit}:</strong> If {row.cue}, then {row.action}.
-                      </p>
-                      {row.why && <p className="ai-coach-why">Why: {row.why}</p>}
-                      {row.habitId && (
-                        <button type="button" className="btn-sm" onClick={() => applyCoachIfThen(row)}>
-                          Use this plan
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </article>
-            )}
-
-            {coachInsight.fallbackPlans.length > 0 && (
-              <article className="ai-coach-card">
-                <h3>Missed-day fallback</h3>
-                <ul className="ai-coach-list">
-                  {coachInsight.fallbackPlans.map((row, idx) => (
-                    <li key={`${row.habit}-${idx}`}>
-                      <strong>{row.habit}:</strong> {row.minimumAction}
-                      {row.resetRule && <div className="ai-coach-evidence">Reset rule: {row.resetRule}</div>}
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            )}
-
-            {coachTodayPlan.length > 0 && (
-              <article className="ai-coach-card">
-                <h3>Today execution plan</h3>
-                <ol className="ai-coach-ordered-list">
-                  {coachTodayPlan.map((row, idx) => (
-                    <li key={`${row.timeWindow}-${idx}`}>
-                      <strong>{row.timeWindow}:</strong> {row.step}
-                      {row.purpose && <div className="ai-coach-evidence">{row.purpose}</div>}
-                    </li>
-                  ))}
-                </ol>
-              </article>
-            )}
-
-            {coachWeeklyExperiment && (
-              <article className="ai-coach-card">
-                <h3>{coachWeeklyExperiment.name || 'Weekly experiment'}</h3>
-                {coachWeeklyExperiment.hypothesis && <p>{coachWeeklyExperiment.hypothesis}</p>}
-                {coachWeeklyExperiment.execution && (
-                  <p className="ai-coach-evidence">Execution: {coachWeeklyExperiment.execution}</p>
-                )}
-                {coachWeeklyExperiment.successMetric && (
-                  <p className="ai-coach-evidence">Success metric: {coachWeeklyExperiment.successMetric}</p>
-                )}
-              </article>
-            )}
-          </div>
-        )}
       </section>
 
       {todaysPlannedHabits.length > 0 && (
