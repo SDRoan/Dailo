@@ -1,4 +1,5 @@
 import { getCalendarGrid } from '../lib/storage'
+import { CheckIcon } from './Icons'
 
 function CalendarView({
   year,
@@ -94,7 +95,7 @@ function CalendarView({
               <span className="calendar-cell-day">{cell.day}</span>
               {completed && (
                 <span className="calendar-cell-dot">
-                  {!selectedHabitId && habits.length > 1 ? getCompletedCount(cell.dateKey) : '✓'}
+                  {!selectedHabitId && habits.length > 1 ? getCompletedCount(cell.dateKey) : <CheckIcon size={12} />}
                 </span>
               )}
               {taskCount > 0 && (
@@ -113,7 +114,7 @@ function CalendarView({
                   aria-label={`${habitCompleted ? 'Unmark' : 'Mark'} completion for ${cell.dateKey}`}
                   title={habitCompleted ? 'Unmark completion' : 'Mark completion'}
                 >
-                  {habitCompleted ? '✓' : '○'}
+                  {habitCompleted ? <CheckIcon size={12} /> : '○'}
                 </button>
               )}
             </div>

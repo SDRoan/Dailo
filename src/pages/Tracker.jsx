@@ -1,16 +1,21 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { getHabits, saveHabits, getCompletions, saveCompletions, getTimeSpent, saveTimeSpent, addTimeForDay, getTasks, saveTasks, getCompletionTimes, saveCompletionTimes, getIfThenPlans, saveIfThenPlans, todayKey, getCurrentWeekDates, getTwoWeeksDates } from '../lib/storage'
+import { getHabits, saveHabits, getCompletions, saveCompletions, getTimeSpent, saveTimeSpent, addTimeForDay, getTasks, saveTasks, getCompletionTimes, saveCompletionTimes, getIfThenPlans, saveIfThenPlans, todayKey, getCurrentWeekDates, getTwoWeeksDates, getFocusMinutes } from '../lib/storage'
 import { getStreak, getCompletionRate, getWeeklyCount } from '../lib/streaks'
-import { getReminderTimes, saveReminderTimes, requestNotificationPermission, checkAndNotify, formatReminderTime } from '../lib/reminders'
+import { getReminderTimes, saveReminderTimes, checkAndNotify } from '../lib/reminders'
 import CalendarView from '../components/CalendarView'
 import OverallProgressChart from '../components/OverallProgressChart'
 import DonutChart from '../components/DonutChart'
 import WeeklyBarChartSimple from '../components/WeeklyBarChartSimple'
 import DailyTasksList from '../components/DailyTasksList'
+import AchievementsPanel from '../components/AchievementsPanel'
 import FocusTimer from '../components/FocusTimer'
+import { FlameIcon, TargetIcon, EditIcon, TrashIcon, CheckIcon } from '../components/Icons'
+import { useAuth } from '../context/AuthContext'
+import UserAvatar from '../components/UserAvatar'
 
 function Tracker() {
+  const { user, cloudError, signOut } = useAuth()
   const [habits, setHabits] = useState([])
   const [focusOpen, setFocusOpen] = useState(false)
   const [completions, setCompletions] = useState({})
@@ -21,9 +26,6 @@ function Tracker() {
   const [viewDays, setViewDays] = useState(14)
   const [reminders, setReminders] = useState({})
   const [reminderOpenId, setReminderOpenId] = useState(null)
-  const [reminderRemindAtInput, setReminderRemindAtInput] = useState('')
-  const [reminderTimeInput, setReminderTimeInput] = useState('')
-  const [reminderEndTimeInput, setReminderEndTimeInput] = useState('')
   const [newHabitGoal, setNewHabitGoal] = useState('')
   const now = new Date()
   const [calendarMonth, setCalendarMonth] = useState({ year: now.getFullYear(), month: now.getMonth() })
@@ -37,6 +39,8 @@ function Tracker() {
   const [planOpenId, setPlanOpenId] = useState(null)
   const [planCueInput, setPlanCueInput] = useState('')
   const [planActionInput, setPlanActionInput] = useState('')
+  const [focusMin, setFocusMin] = useState({})
+  const [signingOut, setSigningOut] = useState(false)
 
   useEffect(() => {
     setHabits(getHabits())
@@ -46,7 +50,8 @@ function Tracker() {
     setTasks(getTasks())
     setCompletionTimes(getCompletionTimes())
     setIfThenPlans(getIfThenPlans())
-  }, [])
+    setFocusMin(getFocusMinutes())
+  }, [user?.id])
 
   const persistTasks = useCallback((next) => {
     setTasks(next)
@@ -140,40 +145,6 @@ function Tracker() {
     persistIfThenPlans(nextPlans)
     if (reminderOpenId === id) setReminderOpenId(null)
     if (planOpenId === id) setPlanOpenId(null)
-  }
-
-  const setReminder = (habitId, remindAt, start, end) => {
-    if (!remindAt && !start && !end) {
-      const next = { ...reminders }
-      delete next[habitId]
-      setReminders(next)
-      saveReminderTimes(next)
-    } else {
-      const next = {
-        ...reminders,
-        [habitId]: {
-          remindAt: remindAt || null,
-          start: start || null,
-          end: end || null,
-        },
-      }
-      setReminders(next)
-      saveReminderTimes(next)
-      if (remindAt || start || end) requestNotificationPermission()
-    }
-    setReminderOpenId(null)
-    setReminderRemindAtInput('')
-    setReminderTimeInput('')
-    setReminderEndTimeInput('')
-  }
-
-  const openReminderPopover = (habitId) => {
-    setReminderOpenId(habitId)
-    setPlanOpenId(null)
-    const entry = reminders[habitId]
-    setReminderRemindAtInput(entry?.remindAt || '')
-    setReminderTimeInput(entry?.start || '09:00')
-    setReminderEndTimeInput(entry?.end || '')
   }
 
   const setIfThenPlan = (habitId, cue, action) => {
@@ -273,34 +244,6 @@ function Tracker() {
     return new Date(y, m - 1, day).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit', year: 'numeric' })
   })()
 
-  const hmToMinutes = (hm) => {
-    if (!hm) return 0
-    const [h, m] = hm.split(':').map(Number)
-    return (h || 0) * 60 + (m || 0)
-  }
-  const plannedDurationMinutes = (startHM, endHM) => {
-    if (!startHM || !endHM) return null
-    const diff = hmToMinutes(endHM) - hmToMinutes(startHM)
-    return diff <= 0 ? null : diff
-  }
-  const workedMinutesForDay = (habitId, dayKey, startHM) => {
-    const iso = completionTimes[habitId]?.[dayKey]
-    if (!iso || !startHM) return null
-    const [y, mo, d] = dayKey.split('-').map(Number)
-    const [h, m] = startHM.split(':').map(Number)
-    const startDate = new Date(y, mo - 1, d, h || 0, m || 0)
-    const completedDate = new Date(iso)
-    const ms = completedDate - startDate
-    if (ms < 0) return null
-    return Math.round(ms / 60000)
-  }
-  const formatDurationMin = (min) => {
-    if (min == null || min < 0) return ''
-    if (min < 60) return `${min}m`
-    const h = Math.floor(min / 60)
-    const m = min % 60
-    return m === 0 ? `${h}h` : `${h}h ${m}m`
-  }
 
   const getTasksForDay = (dateKey) => tasks[dateKey] || []
   const addTask = (dateKey, label) => {
@@ -352,17 +295,32 @@ function Tracker() {
     return hasPlan && !doneToday
   })
 
+  const handleSignOut = async () => {
+    setSigningOut(true)
+    await signOut()
+    setSigningOut(false)
+  }
+
   return (
     <div className="app">
       <nav className="app-nav">
         <Link to="/" className="app-nav-back">← Home</Link>
-        <button
-          type="button"
-          className="focus-timer-trigger"
-          onClick={() => setFocusOpen(true)}
-        >
-          Focus
-        </button>
+        <div className="app-nav-actions">
+          <div className="app-user-chip">
+            <UserAvatar user={user} size={36} />
+            <span className="app-user-pill">{user?.email || 'Signed in'}</span>
+          </div>
+          <button
+            type="button"
+            className="focus-timer-trigger"
+            onClick={() => setFocusOpen(true)}
+          >
+            Focus
+          </button>
+          <button type="button" className="btn auth-secondary-btn" onClick={handleSignOut} disabled={signingOut}>
+            {signingOut ? 'Signing out…' : 'Sign out'}
+          </button>
+        </div>
       </nav>
       <FocusTimer
         open={focusOpen}
@@ -384,6 +342,12 @@ function Tracker() {
         <h1 className="logo">Dailo</h1>
         <p className="tagline">Track your habits and progress effortlessly</p>
       </header>
+      {cloudError ? (
+        <section className="cloud-alert">
+          <strong>Cloud sync needs one more step.</strong>
+          <p>{cloudError}</p>
+        </section>
+      ) : null}
 
       <section className="stats-bar">
         <div className="stat-card">
@@ -504,10 +468,16 @@ function Tracker() {
               <div className="cell habit-label">Habit</div>
               {days.map((d) => {
                 const [y, m, day] = d.split('-').map(Number)
-                const label = new Date(y, m - 1, day).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+                const dateObj = new Date(y, m - 1, day)
+                const fullLabel = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+                const shortWeekday = dateObj.toLocaleDateString(undefined, { weekday: 'narrow' })
                 return (
-                  <div key={d} className={`cell day-cell ${d === today ? 'today' : ''}`} title={d}>
-                    {label}
+                  <div key={d} className={`cell day-cell ${d === today ? 'today' : ''}`} title={fullLabel}>
+                    <span className="day-label-full">{fullLabel}</span>
+                    <span className="day-label-short">
+                      <span className="day-label-weekday">{shortWeekday}</span>
+                      <span className="day-label-date">{day}</span>
+                    </span>
                   </div>
                 )
               })}
@@ -575,78 +545,8 @@ function Tracker() {
                           </span>
                         )}
                         <span className="streak-badge">
-                          🔥 {getStreak(completionDatesByHabit[habit.id] || [])} day streak
+                          <FlameIcon size={14} /> {getStreak(completionDatesByHabit[habit.id] || [])} day streak
                         </span>
-                        <div className="reminder-wrap">
-                          <button
-                            type="button"
-                            className={`icon-btn reminder-btn ${(reminders[habit.id]?.remindAt || reminders[habit.id]?.start) ? 'on' : ''}`}
-                            onClick={() => (reminderOpenId === habit.id ? setReminderOpenId(null) : openReminderPopover(habit.id))}
-                            title={reminders[habit.id]?.remindAt || reminders[habit.id]?.start ? [
-                              reminders[habit.id].remindAt && `Remind ${formatReminderTime(reminders[habit.id].remindAt)}`,
-                              reminders[habit.id].start && `Start ${formatReminderTime(reminders[habit.id].start)}`,
-                              reminders[habit.id].end && `End ${formatReminderTime(reminders[habit.id].end)}`,
-                            ].filter(Boolean).join(' · ') : 'Set Remind, Start & End'}
-                            aria-label="Set reminder"
-                          >
-                            🔔
-                          </button>
-                          {(reminders[habit.id]?.remindAt || reminders[habit.id]?.start) && (
-                            <span className="reminder-label">
-                              {reminders[habit.id].remindAt && `Remind ${formatReminderTime(reminders[habit.id].remindAt)}`}
-                              {reminders[habit.id].remindAt && (reminders[habit.id].start || reminders[habit.id].end) && ' · '}
-                              {reminders[habit.id].start && formatReminderTime(reminders[habit.id].start)}
-                              {reminders[habit.id].start && reminders[habit.id].end && ` – ${formatReminderTime(reminders[habit.id].end)}`}
-                            </span>
-                          )}
-                          {reminders[habit.id]?.start && reminders[habit.id]?.end && (
-                            <span className="duration-badge planned" title="Planned duration">
-                              {formatDurationMin(plannedDurationMinutes(reminders[habit.id].start, reminders[habit.id].end))} planned
-                            </span>
-                          )}
-                          {reminders[habit.id]?.start && isCompleted(habit.id, today) && workedMinutesForDay(habit.id, today, reminders[habit.id].start) != null && (
-                            <span className="duration-badge worked" title="How long you worked today">
-                              Worked {formatDurationMin(workedMinutesForDay(habit.id, today, reminders[habit.id].start))}
-                              {plannedDurationMinutes(reminders[habit.id].start, reminders[habit.id].end) != null &&
-                                workedMinutesForDay(habit.id, today, reminders[habit.id].start) < plannedDurationMinutes(reminders[habit.id].start, reminders[habit.id].end) &&
-                                ` (${formatDurationMin(plannedDurationMinutes(reminders[habit.id].start, reminders[habit.id].end) - workedMinutesForDay(habit.id, today, reminders[habit.id].start))} early)`}
-                            </span>
-                          )}
-                          {reminderOpenId === habit.id && (
-                            <div className="reminder-popover">
-                              <span className="reminder-popover-title">Remind</span>
-                              <label className="reminder-popover-label">Remind at</label>
-                              <input
-                                type="time"
-                                value={reminderRemindAtInput}
-                                onChange={(e) => setReminderRemindAtInput(e.target.value)}
-                                className="reminder-time-input"
-                              />
-                              <label className="reminder-popover-label">Start</label>
-                              <input
-                                type="time"
-                                value={reminderTimeInput}
-                                onChange={(e) => setReminderTimeInput(e.target.value)}
-                                className="reminder-time-input"
-                              />
-                              <label className="reminder-popover-label">End</label>
-                              <input
-                                type="time"
-                                value={reminderEndTimeInput}
-                                onChange={(e) => setReminderEndTimeInput(e.target.value)}
-                                className="reminder-time-input"
-                              />
-                              <div className="reminder-popover-actions">
-                                <button type="button" className="btn-sm" onClick={() => setReminder(habit.id, reminderRemindAtInput || null, reminderTimeInput || null, reminderEndTimeInput || null)}>
-                                  Save
-                                </button>
-                                <button type="button" className="btn-sm ghost" onClick={() => setReminder(habit.id, null, null, null)}>
-                                  Clear
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
                         <div className="plan-wrap">
                           <button
                             type="button"
@@ -655,7 +555,7 @@ function Tracker() {
                             title={(ifThenPlans[habit.id]?.cue && ifThenPlans[habit.id]?.action) ? `If ${ifThenPlans[habit.id].cue}, then ${ifThenPlans[habit.id].action}` : 'Set If-Then plan'}
                             aria-label="Set if-then plan"
                           >
-                            🎯
+                            <TargetIcon size={16} />
                           </button>
                           {(ifThenPlans[habit.id]?.cue && ifThenPlans[habit.id]?.action) && (
                             <span className="plan-label">
@@ -703,7 +603,7 @@ function Tracker() {
                           }}
                           aria-label="Edit"
                         >
-                          ✏️
+                          <EditIcon size={14} />
                         </button>
                         <button
                           type="button"
@@ -711,7 +611,7 @@ function Tracker() {
                           onClick={() => deleteHabit(habit.id)}
                           aria-label="Delete"
                         >
-                          🗑️
+                          <TrashIcon size={14} />
                         </button>
                       </div>
                     )}
@@ -724,7 +624,7 @@ function Tracker() {
                         onClick={() => toggleCompletion(habit.id, day)}
                         aria-label={`${isCompleted(habit.id, day) ? 'Unmark' : 'Mark'} ${habit.name} for ${day}`}
                       >
-                        {isCompleted(habit.id, day) ? '✓' : ''}
+                        {isCompleted(habit.id, day) ? <CheckIcon size={14} /> : ''}
                       </button>
                     </div>
                   ))}
@@ -788,6 +688,15 @@ function Tracker() {
           })}
         </div>
       </section>
+
+      <AchievementsPanel
+        habits={habits}
+        completions={completions}
+        timeSpent={timeSpent}
+        tasks={tasks}
+        completionTimes={completionTimes}
+        focusMinutes={focusMin}
+      />
 
       <section className="calendar-section">
         <button

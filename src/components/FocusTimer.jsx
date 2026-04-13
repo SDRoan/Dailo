@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { todayKey, dateKey, addFocusMinutes, getFocusMinutes, getFocusSession, saveFocusSession } from '../lib/storage'
+import { FlameIcon } from './Icons'
 
 const DEFAULT_WORK_MIN = 25
 const DEFAULT_BREAK_MIN = 5
@@ -309,7 +310,7 @@ function FocusTimer({ open, onClose, standalone = false, onOpenInWindow, allowPo
           )}
           {focusStreak > 1 && (
             <p className="focus-timer-summary-streak">
-              🔥 {focusStreak}-day focus streak
+              <FlameIcon size={14} /> {focusStreak}-day focus streak
             </p>
           )}
           {milestoneMessage && (

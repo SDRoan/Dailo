@@ -1,14 +1,24 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import {
+  FlameIcon, StarIcon, BrainIcon, DumbbellIcon, LeafIcon, BookIcon,
+  CoffeeIcon, LightbulbIcon, PaletteIcon, RocketIcon, BoltIcon,
+  DiamondIcon, MusicIcon, TrophyIcon, HeartIcon, TargetIcon,
+  SunIcon, MoonIcon, DropletIcon, SparklesIcon, GlobeIcon,
+  FlowerIcon, GamepadIcon, BellIcon, EditIcon, CheckIcon
+} from './Icons'
 
-const EMOJIS = [
-  '🎯', '🔥', '⭐', '🧠', '💪', '🌱', '🎉', '📚', '🏃', '☕', '💡', '🎨', '🧘', '🌟', '🚀', '⚡',
-  '🌈', '💎', '🎵', '🍀', '🔮', '🎪', '🏆', '💫', '🦉', '🎭', '🐝', '🦊', '🐻', '🐼', '🐨', '🐯',
-  '🦁', '🐮', '🐸', '🐵', '🐔', '🐧', '🐦', '🐤', '🐲', '🌍', '🌎', '🌏', '🌙', '☀️', '🌤', '⛅',
-  '🌊', '❄️', '💧', '🍎', '🍊', '🍋', '🍇', '🥑', '🍕', '🍩', '🍪', '🍫', '☕', '🧃', '⚽', '🏀',
-  '🏈', '⚾', '🎾', '🏐', '🎱', '🏓', '🎳', '🏸', '🥊', '🎲', '🎮', '🕹', '🎸', '👍', '👏', '🙌',
-  '🎬', '🎤', '🎧', '🎹', '🥁', '🎺', '🎻', '🎼', '📷', '📸', '🎥', '📺', '📻', '🔔', '📯', '🪴',
-  '🌵', '🎋', '🎄', '🕯', '🔑', '📬', '✉️', '📮', '🗝', '🔮', '🦚', '🐿', '🦔', '🦝', '🐺', '🐱',
-  '🐶', '🐴', '🐷', '🐭', '🦈', '🐊', '🦅', '🐢', '🦎', '🐍', '🦂', '⚙️', '🔧', '🛠', '💻', '⌨️',
+const ICON_COMPONENTS = [
+  FlameIcon, StarIcon, BrainIcon, DumbbellIcon, LeafIcon, BookIcon,
+  CoffeeIcon, LightbulbIcon, PaletteIcon, RocketIcon, BoltIcon,
+  DiamondIcon, MusicIcon, TrophyIcon, HeartIcon, TargetIcon,
+  SunIcon, MoonIcon, DropletIcon, SparklesIcon, GlobeIcon,
+  FlowerIcon, GamepadIcon, BellIcon, EditIcon, CheckIcon,
+]
+
+const ICON_COLORS = [
+  '#4ade80', '#f97316', '#facc15', '#60a5fa', '#f472b6',
+  '#a78bfa', '#34d399', '#fb923c', '#e879f9', '#38bdf8',
+  '#fbbf24', '#c084fc', '#2dd4bf', '#f87171', '#a3e635',
 ]
 
 const MAX_EMOJIS = 50
@@ -21,19 +31,21 @@ const HOVER_RADIUS = 85
 const HOVER_FORCE = 2.2
 
 function getInitialItems(containerW, containerH) {
-  const used = EMOJIS.slice(0, MAX_EMOJIS)
-  return used.map((emoji, i) => {
+  const items = []
+  for (let i = 0; i < MAX_EMOJIS; i++) {
     const angle = Math.random() * Math.PI * 2
     const speed = INITIAL_SPEED * (0.6 + Math.random() * 0.4)
-    return {
+    items.push({
       id: i,
-      emoji,
+      iconIndex: i % ICON_COMPONENTS.length,
+      color: ICON_COLORS[i % ICON_COLORS.length],
       x: RADIUS + Math.random() * Math.max(0, containerW - 2 * RADIUS),
       y: RADIUS + Math.random() * Math.max(0, containerH - 2 * RADIUS),
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
-    }
-  })
+    })
+  }
+  return items
 }
 
 function resolveCollision(a, b) {
@@ -259,21 +271,25 @@ function FloatingEmojis() {
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
     >
-      {items.map(({ id, emoji, x, y }) => (
-        <span
-          key={id}
-          className="floating-emoji floating-emoji-physics"
-          style={{
-            left: `${x}px`,
-            top: `${y}px`,
-          }}
-          onPointerDown={(e) => handlePointerDown(e, id)}
-          role="presentation"
-          draggable={false}
-        >
-          {emoji}
-        </span>
-      ))}
+      {items.map(({ id, iconIndex, color, x, y }) => {
+        const IconComp = ICON_COMPONENTS[iconIndex]
+        return (
+          <span
+            key={id}
+            className="floating-emoji floating-emoji-physics"
+            style={{
+              left: `${x}px`,
+              top: `${y}px`,
+              color,
+            }}
+            onPointerDown={(e) => handlePointerDown(e, id)}
+            role="presentation"
+            draggable={false}
+          >
+            <IconComp size={28} />
+          </span>
+        )
+      })}
     </div>
   )
 }

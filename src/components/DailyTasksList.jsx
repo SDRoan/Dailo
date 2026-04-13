@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CheckIcon } from './Icons'
 
 function DailyTasksList({ dateKey, tasks, onToggle, onRemove, onAdd }) {
   const [input, setInput] = useState('')
@@ -34,7 +35,7 @@ function DailyTasksList({ dateKey, tasks, onToggle, onRemove, onAdd }) {
               onClick={() => onToggle(dateKey, t.id)}
               aria-label={t.completed ? 'Uncomplete' : 'Complete'}
             >
-              {t.completed ? '✓' : ''}
+              {t.completed ? <CheckIcon size={14} /> : ''}
             </button>
             <span className="daily-tasks-label">{t.label}</span>
             <button

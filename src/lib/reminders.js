@@ -1,9 +1,18 @@
+import {
+  getActiveStorageScope,
+  migrateLegacyKeyToScope,
+  readScopedStorage,
+  writeScopedStorage,
+  writeScopedStorageWithOptions,
+} from './storageScope'
+
 const REMINDERS_KEY = 'habitloop_reminders'
 const NOTIFY_LOOKBACK_MS = 10 * 60 * 1000
+export const REMINDERS_STORAGE_KEY = REMINDERS_KEY
 
 function load() {
   try {
-    const raw = localStorage.getItem(REMINDERS_KEY)
+    const raw = readScopedStorage(REMINDERS_KEY)
     return raw ? JSON.parse(raw) : { times: {}, lastNotified: {}, lastCheckedAt: 0 }
   } catch {
     return { times: {}, lastNotified: {}, lastCheckedAt: 0 }
@@ -35,14 +44,27 @@ export function getReminderTimes() {
 export function saveReminderTimes(times) {
   const data = load()
   data.times = times
-  localStorage.setItem(REMINDERS_KEY, JSON.stringify(data))
+  writeScopedStorage(REMINDERS_KEY, JSON.stringify(data))
+}
+
+export function getReminderStore() {
+  return load()
+}
+
+export function replaceReminderStore(next, options = {}) {
+  const normalized = {
+    times: next?.times || {},
+    lastNotified: next?.lastNotified || {},
+    lastCheckedAt: Number(next?.lastCheckedAt) || 0,
+  }
+  writeScopedStorageWithOptions(REMINDERS_KEY, JSON.stringify(normalized), options)
 }
 
 function saveLastNotified(key, dateKey) {
   const data = load()
   data.lastNotified = data.lastNotified || {}
   data.lastNotified[key] = dateKey
-  localStorage.setItem(REMINDERS_KEY, JSON.stringify(data))
+  writeScopedStorage(REMINDERS_KEY, JSON.stringify(data))
 }
 
 function getLastNotified(key) {
@@ -57,7 +79,7 @@ function getLastCheckedAt() {
 function saveLastCheckedAt(timestamp) {
   const data = load()
   data.lastCheckedAt = timestamp
-  localStorage.setItem(REMINDERS_KEY, JSON.stringify(data))
+  writeScopedStorage(REMINDERS_KEY, JSON.stringify(data))
 }
 
 export function requestNotificationPermission() {
@@ -210,4 +232,8 @@ export function formatReminderTime(hhmm) {
   const hour = h % 12 || 12
   const ampm = h < 12 ? 'AM' : 'PM'
   return `${hour}:${String(m).padStart(2, '0')} ${ampm}`
+}
+
+export function migrateLegacyReminderData(scope = getActiveStorageScope()) {
+  migrateLegacyKeyToScope(REMINDERS_KEY, scope)
 }

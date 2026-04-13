@@ -1,13 +1,30 @@
+import {
+  getActiveStorageScope,
+  setActiveStorageScope,
+  readScopedStorage,
+  writeScopedStorage,
+  removeScopedStorage,
+  migrateLegacyKeyToScope,
+} from './storageScope'
+
 const HABITS_KEY = 'habitloop_habits'
 const COMPLETIONS_KEY = 'habitloop_completions'
 const TIME_SPENT_KEY = 'habitloop_time'
 const TASKS_KEY = 'habitloop_tasks'
 const COMPLETION_TIMES_KEY = 'habitloop_completion_times'
 const IF_THEN_PLANS_KEY = 'habitloop_if_then_plans'
+export const STORAGE_KEYS = {
+  habits: HABITS_KEY,
+  completions: COMPLETIONS_KEY,
+  timeSpent: TIME_SPENT_KEY,
+  tasks: TASKS_KEY,
+  completionTimes: COMPLETION_TIMES_KEY,
+  ifThenPlans: IF_THEN_PLANS_KEY,
+}
 
 export function getHabits() {
   try {
-    const raw = localStorage.getItem(HABITS_KEY)
+    const raw = readScopedStorage(HABITS_KEY)
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -15,12 +32,12 @@ export function getHabits() {
 }
 
 export function saveHabits(habits) {
-  localStorage.setItem(HABITS_KEY, JSON.stringify(habits))
+  writeScopedStorage(HABITS_KEY, JSON.stringify(habits))
 }
 
 export function getCompletions() {
   try {
-    const raw = localStorage.getItem(COMPLETIONS_KEY)
+    const raw = readScopedStorage(COMPLETIONS_KEY)
     return raw ? JSON.parse(raw) : {}
   } catch {
     return {}
@@ -28,12 +45,12 @@ export function getCompletions() {
 }
 
 export function saveCompletions(completions) {
-  localStorage.setItem(COMPLETIONS_KEY, JSON.stringify(completions))
+  writeScopedStorage(COMPLETIONS_KEY, JSON.stringify(completions))
 }
 
 export function getTimeSpent() {
   try {
-    const raw = localStorage.getItem(TIME_SPENT_KEY)
+    const raw = readScopedStorage(TIME_SPENT_KEY)
     return raw ? JSON.parse(raw) : {}
   } catch {
     return {}
@@ -41,13 +58,13 @@ export function getTimeSpent() {
 }
 
 export function saveTimeSpent(timeSpent) {
-  localStorage.setItem(TIME_SPENT_KEY, JSON.stringify(timeSpent))
+  writeScopedStorage(TIME_SPENT_KEY, JSON.stringify(timeSpent))
 }
 
 /** Daily tasks: { [dateKey]: [{ id, label, completed }] } */
 export function getTasks() {
   try {
-    const raw = localStorage.getItem(TASKS_KEY)
+    const raw = readScopedStorage(TASKS_KEY)
     return raw ? JSON.parse(raw) : {}
   } catch {
     return {}
@@ -55,13 +72,13 @@ export function getTasks() {
 }
 
 export function saveTasks(tasks) {
-  localStorage.setItem(TASKS_KEY, JSON.stringify(tasks))
+  writeScopedStorage(TASKS_KEY, JSON.stringify(tasks))
 }
 
 /** When user marked habit complete: { habitId: { dateKey: "ISO timestamp" } } */
 export function getCompletionTimes() {
   try {
-    const raw = localStorage.getItem(COMPLETION_TIMES_KEY)
+    const raw = readScopedStorage(COMPLETION_TIMES_KEY)
     return raw ? JSON.parse(raw) : {}
   } catch {
     return {}
@@ -69,13 +86,13 @@ export function getCompletionTimes() {
 }
 
 export function saveCompletionTimes(times) {
-  localStorage.setItem(COMPLETION_TIMES_KEY, JSON.stringify(times))
+  writeScopedStorage(COMPLETION_TIMES_KEY, JSON.stringify(times))
 }
 
 /** If-then plans per habit: { habitId: { cue: string, action: string } } */
 export function getIfThenPlans() {
   try {
-    const raw = localStorage.getItem(IF_THEN_PLANS_KEY)
+    const raw = readScopedStorage(IF_THEN_PLANS_KEY)
     return raw ? JSON.parse(raw) : {}
   } catch {
     return {}
@@ -83,7 +100,7 @@ export function getIfThenPlans() {
 }
 
 export function saveIfThenPlans(plans) {
-  localStorage.setItem(IF_THEN_PLANS_KEY, JSON.stringify(plans))
+  writeScopedStorage(IF_THEN_PLANS_KEY, JSON.stringify(plans))
 }
 
 /** Add minutes to a habit for a given day. Returns updated time for that day. */
@@ -191,10 +208,11 @@ export function getCalendarGrid(year, month) {
 
 /** Focus timer: minutes focused per day { [dateKey]: number } */
 const FOCUS_MINUTES_KEY = 'habitloop_focus_minutes'
+STORAGE_KEYS.focusMinutes = FOCUS_MINUTES_KEY
 
 export function getFocusMinutes() {
   try {
-    const raw = localStorage.getItem(FOCUS_MINUTES_KEY)
+    const raw = readScopedStorage(FOCUS_MINUTES_KEY)
     return raw ? JSON.parse(raw) : {}
   } catch {
     return {}
@@ -202,7 +220,7 @@ export function getFocusMinutes() {
 }
 
 export function saveFocusMinutes(focusMinutes) {
-  localStorage.setItem(FOCUS_MINUTES_KEY, JSON.stringify(focusMinutes))
+  writeScopedStorage(FOCUS_MINUTES_KEY, JSON.stringify(focusMinutes))
 }
 
 export function addFocusMinutes(dateKey, minutes) {
@@ -215,10 +233,11 @@ export function addFocusMinutes(dateKey, minutes) {
 
 /** Focus timer running session (for standalone window restore). */
 const FOCUS_SESSION_KEY = 'habitloop_focus_session'
+STORAGE_KEYS.focusSession = FOCUS_SESSION_KEY
 
 export function getFocusSession() {
   try {
-    const raw = localStorage.getItem(FOCUS_SESSION_KEY)
+    const raw = readScopedStorage(FOCUS_SESSION_KEY)
     return raw ? JSON.parse(raw) : null
   } catch {
     return null
@@ -227,8 +246,60 @@ export function getFocusSession() {
 
 export function saveFocusSession(session) {
   if (session == null) {
-    localStorage.removeItem(FOCUS_SESSION_KEY)
+    removeScopedStorage(FOCUS_SESSION_KEY)
     return
   }
-  localStorage.setItem(FOCUS_SESSION_KEY, JSON.stringify(session))
+  writeScopedStorage(FOCUS_SESSION_KEY, JSON.stringify(session))
+}
+
+/** Achievements: [{ id, title, description, emoji, category, earnedAt, dataSnapshot }] */
+const ACHIEVEMENTS_KEY = 'habitloop_achievements'
+const ACHIEVEMENTS_CHECK_KEY = 'habitloop_achievements_last_check'
+STORAGE_KEYS.achievements = ACHIEVEMENTS_KEY
+STORAGE_KEYS.achievementsCheck = ACHIEVEMENTS_CHECK_KEY
+
+export function getAchievements() {
+  try {
+    const raw = readScopedStorage(ACHIEVEMENTS_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+export function saveAchievements(achievements) {
+  writeScopedStorage(ACHIEVEMENTS_KEY, JSON.stringify(achievements))
+}
+
+export function getLastAchievementCheck() {
+  return readScopedStorage(ACHIEVEMENTS_CHECK_KEY) || null
+}
+
+export function saveLastAchievementCheck(dateKey) {
+  writeScopedStorage(ACHIEVEMENTS_CHECK_KEY, dateKey)
+}
+
+export function setStorageScope(scope) {
+  setActiveStorageScope(scope)
+}
+
+export function getStorageScope() {
+  return getActiveStorageScope()
+}
+
+export function migrateLegacyLocalData(scope = getActiveStorageScope()) {
+  ;[
+    HABITS_KEY,
+    COMPLETIONS_KEY,
+    TIME_SPENT_KEY,
+    TASKS_KEY,
+    COMPLETION_TIMES_KEY,
+    IF_THEN_PLANS_KEY,
+    FOCUS_MINUTES_KEY,
+    FOCUS_SESSION_KEY,
+    ACHIEVEMENTS_KEY,
+    ACHIEVEMENTS_CHECK_KEY,
+  ].forEach((key) => {
+    migrateLegacyKeyToScope(key, scope)
+  })
 }

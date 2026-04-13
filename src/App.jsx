@@ -2,17 +2,42 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Landing from './pages/Landing'
 import Tracker from './pages/Tracker'
 import FocusPage from './pages/FocusPage'
+import ProtectedRoute from './components/ProtectedRoute'
+import { AuthProvider } from './context/AuthContext'
 import './App.css'
 
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/app" element={<Tracker />} />
-        <Route path="/app/focus" element={<FocusPage />} />
-        <Route path="/focus" element={<FocusPage />} />
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route
+            path="/app"
+            element={
+              <ProtectedRoute>
+                <Tracker />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/app/focus"
+            element={
+              <ProtectedRoute>
+                <FocusPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/focus"
+            element={
+              <ProtectedRoute>
+                <FocusPage />
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   )
 }
