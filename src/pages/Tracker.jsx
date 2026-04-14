@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { getHabits, saveHabits, getCompletions, saveCompletions, getTimeSpent, saveTimeSpent, addTimeForDay, getTasks, saveTasks, getCompletionTimes, saveCompletionTimes, getIfThenPlans, saveIfThenPlans, todayKey, getCurrentWeekDates, getTwoWeeksDates, getFocusMinutes } from '../lib/storage'
-import { getStreak, getCompletionRate, getWeeklyCount } from '../lib/streaks'
+import { getStreak, getWeeklyCount } from '../lib/streaks'
 import { getReminderTimes, saveReminderTimes, checkAndNotify } from '../lib/reminders'
 import CalendarView from '../components/CalendarView'
 import OverallProgressChart from '../components/OverallProgressChart'
@@ -10,9 +10,11 @@ import WeeklyBarChartSimple from '../components/WeeklyBarChartSimple'
 import DailyTasksList from '../components/DailyTasksList'
 import AchievementsPanel from '../components/AchievementsPanel'
 import FocusTimer from '../components/FocusTimer'
+import WeeklySeasonPanel from '../components/WeeklySeasonPanel'
 import { FlameIcon, TargetIcon, EditIcon, TrashIcon, CheckIcon } from '../components/Icons'
 import { useAuth } from '../context/AuthContext'
 import UserAvatar from '../components/UserAvatar'
+import { buildWeeklySeasonSummary } from '../lib/weeklyGame'
 
 function Tracker() {
   const { user, cloudError, signOut } = useAuth()
@@ -41,6 +43,7 @@ function Tracker() {
   const [planActionInput, setPlanActionInput] = useState('')
   const [focusMin, setFocusMin] = useState({})
   const [signingOut, setSigningOut] = useState(false)
+  const composerInputRef = useRef(null)
 
   useEffect(() => {
     setHabits(getHabits())
@@ -105,12 +108,16 @@ function Tracker() {
 
   const addHabit = () => {
     const name = newHabitName.trim()
-    if (!name) return
+    if (!name) {
+      composerInputRef.current?.focus()
+      return
+    }
     const id = crypto.randomUUID()
     const goal = newHabitGoal ? Number(newHabitGoal) : undefined
     persistHabits([...habits, { id, name, createdAt: new Date().toISOString(), goal }])
     setNewHabitName('')
     setNewHabitGoal('')
+    composerInputRef.current?.focus()
   }
 
   const updateHabit = (id, name, goalValue) => {
@@ -208,14 +215,14 @@ function Tracker() {
     return acc
   }, {})
 
-  const overallCompletionRate =
-    habits.length === 0
-      ? 0
-      : Math.round(
-          habits.reduce((sum, h) => sum + getCompletionRate(completionDatesByHabit[h.id] || [], 7), 0) / habits.length
-        )
-
-  const totalStreak = habits.reduce((sum, h) => sum + getStreak(completionDatesByHabit[h.id] || []), 0)
+  const seasonSummary = buildWeeklySeasonSummary({
+    habits,
+    completionDatesByHabit,
+    tasks,
+    completionTimes,
+    focusMinutes: focusMin,
+    seasonSeed: user?.id || user?.email || 'local',
+  })
 
   const dailyCompletionPcts = days.map((d) => {
     const count = habits.filter(
@@ -295,6 +302,30 @@ function Tracker() {
     return hasPlan && !doneToday
   })
 
+  const todayCompletedCount = habits.filter(
+    (h) => isCompleted(h.id, today) || ((timeSpent[h.id] || {})[today] || 0) > 0
+  ).length
+  const heroHour = new Date().getHours()
+  const heroGreeting =
+    heroHour < 12 ? 'Good morning' : heroHour < 17 ? 'Good afternoon' : 'Good evening'
+  const heroName = (
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    user?.email?.split('@')[0] ||
+    ''
+  )
+    .split(' ')[0]
+    .trim()
+  const heroDateLabel = new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  })
+  const heroSub =
+    habits.length === 0
+      ? 'Add your first habit to start the loop.'
+      : `${todayCompletedCount} of ${habits.length} complete today. ${seasonSummary.rank.current.name} League. ${seasonSummary.duel.pressureLine}`
+
   const handleSignOut = async () => {
     setSigningOut(true)
     await signOut()
@@ -304,12 +335,12 @@ function Tracker() {
   return (
     <div className="app">
       <nav className="app-nav">
-        <Link to="/" className="app-nav-back">← Home</Link>
+        <Link to="/" className="app-nav-back" aria-label="Home">
+          <span className="app-nav-back-glyph" aria-hidden>←</span>
+          <span className="app-nav-back-label">Home</span>
+        </Link>
+        <Link to="/" className="app-nav-brand" aria-label="Dailo">Dailo</Link>
         <div className="app-nav-actions">
-          <div className="app-user-chip">
-            <UserAvatar user={user} size={36} />
-            <span className="app-user-pill">{user?.email || 'Signed in'}</span>
-          </div>
           <button
             type="button"
             className="focus-timer-trigger"
@@ -317,6 +348,9 @@ function Tracker() {
           >
             Focus
           </button>
+          <Link to="/app/profile" className="app-avatar-link" aria-label="Open profile">
+            <UserAvatar user={user} size={32} />
+          </Link>
           <button type="button" className="btn auth-secondary-btn" onClick={handleSignOut} disabled={signingOut}>
             {signingOut ? 'Signing out…' : 'Sign out'}
           </button>
@@ -338,9 +372,23 @@ function Tracker() {
           if (w) w.focus()
         }}
       />
-      <header className="header">
-        <h1 className="logo">Dailo</h1>
-        <p className="tagline">Track your habits and progress effortlessly</p>
+      <header className="hero">
+        <div className="hero-text">
+          <p className="hero-eyebrow">{heroDateLabel}</p>
+          <h1 className="hero-title">
+            {heroGreeting}
+            {heroName ? <span className="hero-title-name">, {heroName}.</span> : '.'}
+          </h1>
+          <p className="hero-sub">{heroSub}</p>
+        </div>
+        <div className="hero-ring" aria-hidden={habits.length === 0}>
+          <DonutChart
+            completed={todayCompletedCount}
+            total={Math.max(1, habits.length)}
+            size={140}
+            label="Today"
+          />
+        </div>
       </header>
       {cloudError ? (
         <section className="cloud-alert">
@@ -349,71 +397,101 @@ function Tracker() {
         </section>
       ) : null}
 
-      <section className="stats-bar">
+      <WeeklySeasonPanel summary={seasonSummary} />
+
+      <section className="stats-bar" aria-label="Summary">
         <div className="stat-card">
-          <span className="stat-value">{overallCompletionRate}%</span>
-          <span className="stat-label">7-day consistency</span>
+          <span className="stat-label">Weekly XP</span>
+          <span className="stat-value">{seasonSummary.current.xp}</span>
         </div>
         <div className="stat-card highlight">
-          <span className="stat-value">{totalStreak}</span>
-          <span className="stat-label">Total streak days</span>
+          <span className="stat-label">League</span>
+          <span className="stat-value stat-value-word">{seasonSummary.rank.current.name}</span>
         </div>
         <div className="stat-card">
-          <span className="stat-value">{habits.length}</span>
-          <span className="stat-label">Habits tracked</span>
+          <span className="stat-label">Live streak</span>
+          <span className="stat-value">{seasonSummary.current.liveStreak}</span>
+        </div>
+        <div className="stat-card">
+          <span className="stat-label">Beat last week</span>
+          <span className={`stat-value ${seasonSummary.duel.state === 'ahead' ? 'is-positive' : seasonSummary.duel.state === 'behind' ? 'is-negative' : ''}`}>
+            {seasonSummary.duel.deltaXp > 0 ? '+' : ''}{seasonSummary.duel.deltaXp}
+          </span>
         </div>
       </section>
 
       <section className="overall-progress-section">
-        <h2 className="overall-progress-title">Overall Progress</h2>
+        <div className="overall-progress-heading">
+          <p className="section-eyebrow">Overview</p>
+          <h2 className="overall-progress-title">The week at a glance</h2>
+        </div>
         <div className="overall-progress-content">
           <div className="overall-progress-charts">
             <div className="overall-progress-bar-wrap">
               <WeeklyBarChartSimple
                 dataPoints={weekDailyCounts}
                 maxValue={Math.max(1, ...weekDailyCounts, habits.length)}
-                height={80}
+                height={96}
               />
             </div>
             <div className="overall-progress-donut-wrap">
               <DonutChart
                 completed={weekCompletedCount}
                 total={weekTotalPossible}
-                size={100}
+                size={132}
                 label="Completed"
               />
             </div>
           </div>
-          <p className="overall-progress-quote">{motivationalQuote}</p>
-          <p className="overall-progress-week-start">Start of the week: {startOfWeekDate}</p>
+          <div className="overall-progress-footer">
+            <p className="overall-progress-quote">&ldquo;{motivationalQuote}&rdquo;</p>
+            <p className="overall-progress-week-start">Week of {startOfWeekDate}</p>
+          </div>
         </div>
       </section>
 
-      <section className="add-habit">
+      <section className="composer" aria-label="Add habit">
         <input
+          ref={composerInputRef}
           type="text"
-          placeholder="Add a new habit (e.g. Morning run, Read 20 min)"
+          placeholder="What habit will you build next?"
           value={newHabitName}
           onChange={(e) => setNewHabitName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && addHabit()}
-          className="add-input"
+          className="composer-input"
+          aria-label="New habit name"
         />
-        <select
-          className="add-goal-select"
-          value={newHabitGoal}
-          onChange={(e) => setNewHabitGoal(e.target.value)}
-          title="Weekly goal (optional)"
-        >
-          <option value="">No goal</option>
-          <option value="3">3× per week</option>
-          <option value="4">4× per week</option>
-          <option value="5">5× per week</option>
-          <option value="6">6× per week</option>
-          <option value="7">Every day</option>
-        </select>
-        <button type="button" onClick={addHabit} className="btn btn-primary">
-          Add habit
-        </button>
+        <div className="composer-row">
+          <div className="composer-chips" role="radiogroup" aria-label="Weekly goal">
+            {[
+              { value: '', label: 'No goal' },
+              { value: '3', label: '3×' },
+              { value: '4', label: '4×' },
+              { value: '5', label: '5×' },
+              { value: '6', label: '6×' },
+              { value: '7', label: 'Daily' },
+            ].map((opt) => (
+              <button
+                key={opt.value || 'none'}
+                type="button"
+                role="radio"
+                aria-checked={newHabitGoal === opt.value}
+                className={`composer-chip ${newHabitGoal === opt.value ? 'active' : ''}`}
+                onClick={() => setNewHabitGoal(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={addHabit}
+            className={`composer-submit ${newHabitName.trim() ? '' : 'is-idle'}`}
+            aria-disabled={!newHabitName.trim()}
+          >
+            Add habit
+          </button>
+        </div>
       </section>
 
       {todaysPlannedHabits.length > 0 && (
@@ -443,7 +521,10 @@ function Tracker() {
 
       <section className="tracker-section">
         <div className="tracker-header">
-          <h2>Daily tracker</h2>
+          <div className="section-heading">
+            <p className="section-eyebrow">Habits</p>
+            <h2>Daily tracker</h2>
+          </div>
           <div className="view-toggle">
             <button
               type="button"
@@ -501,6 +582,7 @@ function Tracker() {
             ) : (
               habits.map((habit) => {
                 const weeklyCount = getWeeklyCount(completionDatesByHabit[habit.id] || [], 7)
+                const habitWeeklyXp = weeklyCount * 18 + ((habit.goal != null && weeklyCount >= habit.goal) ? 40 : 0)
                 const progressMax = 7
                 return (
                 <div key={habit.id} className="grid-row habit-row">
@@ -539,6 +621,7 @@ function Tracker() {
                     ) : (
                       <div className="habit-name-wrap">
                         <span className="habit-name">{habit.name}</span>
+                        <span className="habit-xp-badge">+{habitWeeklyXp} XP</span>
                         {habit.goal != null && (
                           <span className={`goal-badge ${getWeeklyCount(completionDatesByHabit[habit.id] || [], 7) >= habit.goal ? 'met' : ''}`}>
                             {getWeeklyCount(completionDatesByHabit[habit.id] || [], 7)}/{habit.goal} this week
@@ -646,7 +729,10 @@ function Tracker() {
       </section>
 
       <section className="daily-columns-section">
-        <h2 className="daily-columns-title">This week</h2>
+        <div className="section-heading">
+          <p className="section-eyebrow">Week view</p>
+          <h2 className="daily-columns-title">This week</h2>
+        </div>
         <div className="daily-columns">
           {weekDates.map((d) => {
             const dayTasks = getTasksForDay(d)
